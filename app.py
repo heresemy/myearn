@@ -3,7 +3,7 @@ import requests
 import random
 import string
 from datetime import datetime, timedelta
-import json
+import time
 
 app = Flask(__name__)
 
@@ -28,7 +28,7 @@ def process_url():
     
     print(f"📥 Original URL: {original_url}")
     
-    # Step 1: Arolink
+    # Step 1: Arolink se short karo
     arolink_alias = generate_semy_alias()
     arolink_result = hit_arolink(original_url, arolink_alias)
     
@@ -41,18 +41,19 @@ def process_url():
     arolink_short = arolink_result.get('shortenedUrl')
     print(f"🔗 Arolink: {arolink_short}")
     
-    # Step 2: is.gd se short karo (FIXED)
-    isgd_result = hit_isgd(arolink_short)
+    # Step 2: Arolink URL ko TinyURL se short karo (NO API KEY)
+    tinyurl_result = hit_tinyurl(arolink_short)
     
-    if 'error' in isgd_result:
+    if 'error' in tinyurl_result:
         return jsonify({
-            "error": "is.gd failed",
+            "error": "TinyURL failed",
             "arolink_url": arolink_short,
-            "details": isgd_result
+            "details": tinyurl_result
         }), 500
     
-    print(f"🔗 is.gd: {isgd_result.get('url')}")
+    print(f"🔗 TinyURL: {tinyurl_result.get('url')}")
     
+    # Final response
     return jsonify({
         "success": True,
         "original_url": original_url,
@@ -61,15 +62,16 @@ def process_url():
         },
         "step_1_arolink": {
             "short_url": arolink_short,
-            "expires_in": "30 minutes"
+            "expires_in": "30 minutes",
+            "full_response": arolink_result
         },
-        "step_2_isgd": {
-            "short_url": isgd_result.get('url'),
-            "full_response": isgd_result
+        "step_2_tinyurl": {
+            "short_url": tinyurl_result.get('url'),
+            "full_response": tinyurl_result
         },
         "final_links": {
             "arolink": arolink_short,
-            "isgd": isgd_result.get('url')
+            "tinyurl": tinyurl_result.get('url')
         },
         "timestamp": datetime.now().isoformat()
     })
@@ -90,33 +92,25 @@ def hit_arolink(url, alias):
     except Exception as e:
         return {"error": str(e)}
 
-def hit_isgd(url):
-    """is.gd - FIXED: No JSON, direct text response"""
+def hit_tinyurl(url):
+    """TinyURL - No API key needed!"""
     try:
-        # is.gd ka API simple text return karta hai
-        params = {
-            "format": "simple",  # Simple text response
-            "url": url
-        }
-        
-        response = requests.get("https://is.gd/create.php", params=params, timeout=10)
-        
-        print(f"🌐 is.gd Response: {response.text}")
+        # TinyURL simple API
+        response = requests.get(
+            f"https://tinyurl.com/api-create.php?url={url}",
+            timeout=10
+        )
         
         if response.status_code == 200:
             short_url = response.text.strip()
-            
-            # Check if it's a valid URL
-            if short_url.startswith('https://is.gd/'):
+            if short_url and short_url.startswith('https://tinyurl.com/'):
                 return {
                     "url": short_url,
                     "status": "success",
-                    "service": "is.gd"
+                    "service": "TinyURL"
                 }
-            elif "error" in short_url.lower():
-                return {"error": short_url}
             else:
-                return {"error": f"Unexpected response: {short_url}"}
+                return {"error": "Invalid response from TinyURL"}
         else:
             return {"error": f"Status {response.status_code}"}
     except Exception as e:
@@ -126,15 +120,14 @@ def hit_isgd(url):
 def home():
     return jsonify({
         "service": "Double URL Shortener 🚀",
-        "flow": "Original URL → Arolink (30 min) → is.gd (Permanent)",
+        "flow": "Original URL → Arolink (30 min) → TinyURL",
         "how_to_use": "/done?url=YOUR_URL",
         "example": "/done?url=https://google.com",
         "alias_format": "Semy + 3 CAPITAL Letters + 3 Numbers",
         "features": [
-            "✅ is.gd - Fastest redirect",
-            "✅ No API key needed",
+            "✅ No API key required",
             "✅ Arolink expires in 30 minutes",
-            "✅ is.gd link permanent"
+            "✅ TinyURL permanent"
         ]
     })
 
