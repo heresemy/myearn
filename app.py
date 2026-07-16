@@ -3,7 +3,6 @@ import requests
 import random
 import string
 from datetime import datetime, timedelta
-import time
 
 app = Flask(__name__)
 
@@ -19,16 +18,18 @@ def generate_semy_alias():
 @app.route('/done', methods=['GET'])
 def process_url():
     original_url = request.args.get('url')
+    service = request.args.get('service', 'isgd')  # Default: isgd
     
     if not original_url:
         return jsonify({
             "error": "URL nahi diya!",
-            "example": "/done?url=https://example.com"
+            "example": "/done?url=https://example.com",
+            "services": "isgd, vgd, tinyurl, 1ptco"
         }), 400
     
     print(f"📥 Original URL: {original_url}")
     
-    # Step 1: Arolink se short karo
+    # Step 1: Arolink
     arolink_alias = generate_semy_alias()
     arolink_result = hit_arolink(original_url, arolink_alias)
     
@@ -41,22 +42,28 @@ def process_url():
     arolink_short = arolink_result.get('shortenedUrl')
     print(f"🔗 Arolink: {arolink_short}")
     
-    # Step 2: Arolink URL ko TinyURL se short karo (NO API KEY)
-    tinyurl_result = hit_tinyurl(arolink_short)
+    # Step 2: Choose service
+    service_functions = {
+        'isgd': hit_isgd,
+        'vgd': hit_vgd,
+        'tinyurl': hit_tinyurl,
+        '1ptco': hit_1ptco
+    }
     
-    if 'error' in tinyurl_result:
+    hit_func = service_functions.get(service, hit_isgd)
+    second_result = hit_func(arolink_short)
+    
+    if 'error' in second_result:
         return jsonify({
-            "error": "TinyURL failed",
+            "error": f"{service} failed",
             "arolink_url": arolink_short,
-            "details": tinyurl_result
+            "details": second_result
         }), 500
     
-    print(f"🔗 TinyURL: {tinyurl_result.get('url')}")
-    
-    # Final response
     return jsonify({
         "success": True,
         "original_url": original_url,
+        "service_used": service,
         "generated_aliases": {
             "arolink": arolink_alias
         },
@@ -65,13 +72,19 @@ def process_url():
             "expires_in": "30 minutes",
             "full_response": arolink_result
         },
-        "step_2_tinyurl": {
-            "short_url": tinyurl_result.get('url'),
-            "full_response": tinyurl_result
+        f"step_2_{service}": {
+            "short_url": second_result.get('url'),
+            "service": second_result.get('service'),
+            "full_response": second_result
         },
         "final_links": {
             "arolink": arolink_short,
-            "tinyurl": tinyurl_result.get('url')
+            "second": second_result.get('url')
+        },
+        "redirect_info": {
+            "both_links_will_redirect": True,
+            "arolink_expires": "30 minutes",
+            "second_link": "Permanent"
         },
         "timestamp": datetime.now().isoformat()
     })
@@ -92,10 +105,57 @@ def hit_arolink(url, alias):
     except Exception as e:
         return {"error": str(e)}
 
-def hit_tinyurl(url):
-    """TinyURL - No API key needed!"""
+def hit_isgd(url):
+    """is.gd - Fastest redirect"""
     try:
-        # TinyURL simple API
+        params = {
+            "format": "json",
+            "url": url
+        }
+        response = requests.get("https://is.gd/create.php", params=params, timeout=10)
+        
+        if response.status_code == 200:
+            data = response.json()
+            if 'shorturl' in data:
+                return {
+                    "url": data['shorturl'],
+                    "status": "success",
+                    "service": "is.gd"
+                }
+            else:
+                return {"error": data.get('error', 'Unknown error')}
+        else:
+            return {"error": f"Status {response.status_code}"}
+    except Exception as e:
+        return {"error": str(e)}
+
+def hit_vgd(url):
+    """v.gd"""
+    try:
+        params = {
+            "format": "json",
+            "url": url
+        }
+        response = requests.get("https://v.gd/create.php", params=params, timeout=10)
+        
+        if response.status_code == 200:
+            data = response.json()
+            if 'shorturl' in data:
+                return {
+                    "url": data['shorturl'],
+                    "status": "success",
+                    "service": "v.gd"
+                }
+            else:
+                return {"error": data.get('error', 'Unknown error')}
+        else:
+            return {"error": f"Status {response.status_code}"}
+    except Exception as e:
+        return {"error": str(e)}
+
+def hit_tinyurl(url):
+    """TinyURL"""
+    try:
         response = requests.get(
             f"https://tinyurl.com/api-create.php?url={url}",
             timeout=10
@@ -110,7 +170,31 @@ def hit_tinyurl(url):
                     "service": "TinyURL"
                 }
             else:
-                return {"error": "Invalid response from TinyURL"}
+                return {"error": "Invalid response"}
+        else:
+            return {"error": f"Status {response.status_code}"}
+    except Exception as e:
+        return {"error": str(e)}
+
+def hit_1ptco(url):
+    """1pt.co"""
+    try:
+        response = requests.post(
+            "https://1pt.co/api/v1/create",
+            json={"url": url},
+            timeout=10
+        )
+        
+        if response.status_code == 200:
+            data = response.json()
+            if 'shortened' in data:
+                return {
+                    "url": data['shortened'],
+                    "status": "success",
+                    "service": "1pt.co"
+                }
+            else:
+                return {"error": "Invalid response"}
         else:
             return {"error": f"Status {response.status_code}"}
     except Exception as e:
@@ -120,14 +204,21 @@ def hit_tinyurl(url):
 def home():
     return jsonify({
         "service": "Double URL Shortener 🚀",
-        "flow": "Original URL → Arolink (30 min) → TinyURL",
-        "how_to_use": "/done?url=YOUR_URL",
-        "example": "/done?url=https://google.com",
+        "flow": "Original URL → Arolink (30 min) → Second Shortener",
+        "how_to_use": "/done?url=YOUR_URL&service=isgd",
+        "example": "/done?url=https://google.com&service=isgd",
+        "services": {
+            "isgd": "Fastest redirect (Recommended)",
+            "vgd": "is.gd alternative",
+            "tinyurl": "Popular & reliable",
+            "1ptco": "Short & clean"
+        },
         "alias_format": "Semy + 3 CAPITAL Letters + 3 Numbers",
         "features": [
-            "✅ No API key required",
+            "✅ All services redirect directly",
+            "✅ No API key needed",
             "✅ Arolink expires in 30 minutes",
-            "✅ TinyURL permanent"
+            "✅ Second link is permanent"
         ]
     })
 
